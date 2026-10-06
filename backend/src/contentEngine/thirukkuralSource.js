@@ -23,6 +23,45 @@ const THIRUKKURAL_CORPUS = [
     contextTag: 'wisdom',
   },
   {
+    number: 392,
+    chapter: 'கல்வி',
+    chapterEnglish: 'Learning',
+    section: 'பொருட்பால்',
+    theme: 'education_growth',
+    kuralTamil: 'எண்ணென்ப ஏனை எழுத்தென்ப இவ்விரண்டும்\nகண்ணென்ப வாழும் உயிர்க்கு.',
+    transliteration: 'Ennenba yenai ezhuththenba ivvirandum kannenba vaazhum uyirkku.',
+    englishTranslation: 'Numbers and letters, the twin lights of learning, are truly the seeing eyes of every human soul.',
+    modernExplanationTamil: 'எழுத்தும் எண்ணும் மனித வாழ்க்கைக்கு இரு கண்கள் போன்றவையாகும்; அவற்றைக் கற்றுத் தெளிவதே வாழ்வின் உயர்வு.',
+    modernExplanationEnglish: 'The mastery of language and numbers are as essential to human life as two seeing eyes are to the body.',
+    contextTag: 'wisdom',
+  },
+  {
+    number: 393,
+    chapter: 'கல்வி',
+    chapterEnglish: 'Learning',
+    section: 'பொருட்பால்',
+    theme: 'education_growth',
+    kuralTamil: 'கண்ணுடையர் என்பவர் கற்றோர் முகத்திரண்டு\nபுண்ணுடையர் கல்லா தவர்.',
+    transliteration: 'Kannudaiyar enbavar katror mugaththirandu punnudaiyar kallaa thavar.',
+    englishTranslation: 'Those who learn have eyes that truly see; those who refuse wisdom carry only wounds upon their face.',
+    modernExplanationTamil: 'கல்வியறிவு உடையவர்களே கண்கள் உள்ளவர்கள் ஆவர்; கல்வி கற்காதவர்களின் முகத்தில் இருப்பது கண்களல்ல, அவை வெறும் புண்கள் மட்டுமே.',
+    modernExplanationEnglish: 'Those who cultivate wisdom possess true vision, while those who refuse learning carry blindness through life.',
+    contextTag: 'wisdom',
+  },
+  {
+    number: 394,
+    chapter: 'கல்வி',
+    chapterEnglish: 'Learning',
+    section: 'பொருட்பால்',
+    theme: 'education_growth',
+    kuralTamil: 'உவப்பத் தலைக்கூடி உள்ளப் பிரிதல்\nஅனைத்தே புலவர் தொழில்.',
+    transliteration: 'Uvappath thalaikkoodi ullap piridhal anaiththe pulavar thozhil.',
+    englishTranslation: 'To meet with joy and part with thoughtful inspiration is the hallmark of the truly wise.',
+    modernExplanationTamil: 'கற்றறிந்த மேலோரைச் சந்திக்கும் போது மகிழ்வதும், பிரியும் போது நல்வழியில் தொடர்ந்து சிந்திக்க வைப்பதும் அறிஞர்களின் இயல்பாகும்.',
+    modernExplanationEnglish: 'The meeting of noble minds brings pure joy, and their parting leaves behind an enduring inspiration to reflect and grow.',
+    contextTag: 'wisdom',
+  },
+  {
     number: 595,
     chapter: 'ஊக்கமுடைமை',
     chapterEnglish: 'Enthusiasm & Resolve',
@@ -143,14 +182,29 @@ const THIRUKKURAL_CORPUS = [
 
 /**
  * Returns an authentic Thirukkural couplet.
- * Selects based on theme affinity and deterministic index.
+ * Selects based on theme affinity, deterministic index, and deduplication exclusions.
+ *
+ * @param {string} [theme='wisdom'] - Preferred theme tag
+ * @param {number} [index=0] - Deterministic sequence index
+ * @param {Object} [options={}] - Options including excludeNumbers
+ * @returns {Object} Authentic Kural couplet object
  */
-function getAuthenticThirukkural(theme = 'wisdom', index = 0) {
-  // First look for matching theme
-  const matching = THIRUKKURAL_CORPUS.filter((k) => k.theme === theme || k.contextTag === theme);
-  const pool = matching.length > 0 ? matching : THIRUKKURAL_CORPUS;
-  const safeIndex = Math.abs(index) % pool.length;
-  return pool[safeIndex];
+function getAuthenticThirukkural(theme = 'wisdom', index = 0, options = {}) {
+  const rawExcludes = options.excludeNumbers || options.excludedKuralNumbers || [];
+  const excludeNumbers = Array.isArray(rawExcludes)
+    ? rawExcludes.map(Number)
+    : [Number(rawExcludes)];
+
+  // 1. Filter out recently used Kurals
+  const available = THIRUKKURAL_CORPUS.filter((k) => !excludeNumbers.includes(k.number));
+  const pool = available.length > 0 ? available : THIRUKKURAL_CORPUS;
+
+  // 2. Prioritize matching theme if available in filtered pool
+  const themeMatching = pool.filter((k) => k.theme === theme || k.contextTag === theme);
+  const finalPool = themeMatching.length > 0 ? themeMatching : pool;
+
+  // Pick next unused Kural in order
+  return finalPool[0];
 }
 
 /**

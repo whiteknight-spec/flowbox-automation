@@ -7,11 +7,11 @@ const client = axios.create({ baseURL: API_BASE });
 
 client.interceptors.request.use((config) => {
   const token = sessionStorage.getItem('flowbox_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  } else if (!AUTH_ENABLED) {
+  if (!AUTH_ENABLED) {
     // Development mode bypass token for local dev user
     config.headers.Authorization = 'Bearer dev-local-user';
+  } else if (token && token !== 'null' && token !== 'undefined') {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
@@ -42,8 +42,16 @@ export const api = {
   getLatestQuoteJob: (id) => client.get(`/api/workflows/${id}/quote-jobs/latest`),
   renderQuoteJob: (workflowId, jobId, options = {}) =>
     client.post(`/api/workflows/${workflowId}/quote-jobs/${jobId}/render`, options),
+  approveQuoteJob: (jobId, data = {}) => client.post(`/api/quote-video-jobs/${jobId}/approve`, data),
+  regenerateQuoteJob: (jobId, data = {}) => client.post(`/api/quote-video-jobs/${jobId}/regenerate`, data),
+  publishQuoteJob: (jobId, data = {}) => client.post(`/api/quote-video-jobs/${jobId}/publish`, data),
+  getJobPublications: (jobId) => client.get(`/api/quote-video-jobs/${jobId}/publications`),
+  getPublishingStatus: () => client.get('/api/quote-video-jobs/publishing/status'),
+  getQuoteJob: (jobId) => client.get(`/api/quote-video-jobs/${jobId}`),
   getVideoUrl: (jobId) => {
-    const token = sessionStorage.getItem('flowbox_token') || (!AUTH_ENABLED ? 'dev-local-user' : '');
+    const token = !AUTH_ENABLED
+      ? 'dev-local-user'
+      : sessionStorage.getItem('flowbox_token') || '';
     return `${API_BASE}/api/quote-video-jobs/${jobId}/video${token ? `?token=${encodeURIComponent(token)}` : ''}`;
   },
   listCredentials: () => client.get('/api/credentials'),

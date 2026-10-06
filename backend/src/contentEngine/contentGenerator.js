@@ -10,6 +10,7 @@
 
 const { getAuthenticThirukkural } = require('./thirukkuralSource');
 const { getTopicMeta } = require('./topicRotation');
+const { computeContentFingerprint } = require('./contentDeduplication');
 
 // Original Curated Quotes Library by Topic, Language, and Duration
 const ORIGINAL_QUOTES = {
@@ -48,6 +49,14 @@ const ORIGINAL_QUOTES = {
         hashtags: ['#SelfConfidence', '#TamilThought', '#DreamBig', '#Shorts'],
         optimalDurations: [10, 15],
       },
+      {
+        title: 'இலக்கின் தெளிவு',
+        quote: 'புயல் காற்று வீசினாலும், தன் வேர்களை ஆழமாகப் பதித்த மரம் ஒருபோதும் சாய்வதில்லை.',
+        explanation: 'உன் இலக்கில் அசைக்க முடியாத உறுதி இருந்தால், எந்தத் தடையும் உன்னை வீழ்த்த முடியாது.',
+        caption: 'உறுதியோடு நில், வெற்றியை வெல்! 🌟',
+        hashtags: ['#TamilGrit', '#Steadfast', '#InnerStrength'],
+        optimalDurations: [15, 20],
+      },
     ],
     en: [
       {
@@ -82,6 +91,14 @@ const ORIGINAL_QUOTES = {
         hashtags: ['#WorkEthic', '#Ambition', '#DailyDrive'],
         optimalDurations: [10, 15],
       },
+      {
+        title: 'Unyielding Stride',
+        quote: 'Champions are not defined by an absence of fear, but by stepping forward while heart is racing.',
+        explanation: 'Courage is action in the presence of difficulty, not the absence of it.',
+        caption: 'Step forward boldly. 💫',
+        hashtags: ['#Bravery', '#WinningMindset', '#ActionNow'],
+        optimalDurations: [15, 20],
+      },
     ],
   },
 
@@ -112,6 +129,22 @@ const ORIGINAL_QUOTES = {
         hashtags: ['#TimelessLove', '#TamilRomance', '#LoveWords', '#Feelings'],
         optimalDurations: [15, 20, 30],
       },
+      {
+        title: 'நினைவுகளின் நிழல்',
+        quote: 'தொலைவு எவ்வளவு கூடினாலும், தூய அன்பின் நினைவுகள் இதயத்தின் மிக நெருக்கமான அறையில் வாழ்கின்றன.',
+        explanation: 'தூரம் என்பது உடலுக்கு மட்டுமே; உள்ளத்து அன்பிற்கு எல்லைகள் கிடையாது.',
+        caption: 'நெஞ்சில் வாழும் நீங்காத அன்பு. 🌸❤️',
+        hashtags: ['#LoveDistances', '#HeartfeltTamil', '#PureBond'],
+        optimalDurations: [10, 15],
+      },
+      {
+        title: 'விழியோரக் கவிதை',
+        quote: 'பேசாத வார்த்தைகளை விட, ஒருவருக்கொருவர் பகிரும் அன்பான பார்வை ஆயிரம் அர்த்தங்களைச் சொல்லிவிடும்.',
+        explanation: 'கண்களின் வழியே பேசும் அன்பே உலகின் மிகவும் உண்மையான மொழி.',
+        caption: 'பார்வை பேசும் மௌனக் கவிதை. ✨🌹',
+        hashtags: ['#SilentLove', '#TamilLove', '#Gaze'],
+        optimalDurations: [15, 20],
+      },
     ],
     en: [
       {
@@ -137,6 +170,22 @@ const ORIGINAL_QUOTES = {
         caption: 'Quiet warmth, deep bond. 💖',
         hashtags: ['#TrueLove', '#Connection', '#Devotion', '#LoveNotes'],
         optimalDurations: [15, 20, 30],
+      },
+      {
+        title: 'The Quiet Anchor',
+        quote: 'Love is not found in dramatic storms, but in the steadfast anchor that holds you steady through them.',
+        explanation: 'Real love provides unwavering safety and support when the tides turn high.',
+        caption: 'An anchor in every season. ⚓❤️',
+        hashtags: ['#SteadfastLove', '#Anchor', '#EnduringLove'],
+        optimalDurations: [10, 15],
+      },
+      {
+        title: 'Eternal Cadence',
+        quote: 'To be known completely and cherished wholly is the quietest miracle of being alive.',
+        explanation: 'Deep intimacy is being fully seen and deeply valued without pretense.',
+        caption: 'The miracle of being truly seen. 💫',
+        hashtags: ['#Beloved', '#SoulConnection', '#EternalLove'],
+        optimalDurations: [15, 20],
       },
     ],
   },
@@ -168,6 +217,22 @@ const ORIGINAL_QUOTES = {
         hashtags: ['#Unity', '#Compassion', '#HumanityMatters'],
         optimalDurations: [15, 20, 30],
       },
+      {
+        title: 'அன்பின் நிழல்',
+        quote: 'தன் நிழலைத் தானே அனுபவிக்காத மரத்தைப் போல, பிறர் வாழ்வை வளமாக்குவதே மனிதப் பிறவியின் மேன்மை.',
+        explanation: 'தன்னலமற்ற சேவை மட்டுமே மனிதனை காலத்தை வென்று வாழவைக்கிறது.',
+        caption: 'பிறருக்கு நிழலாவோம். 🌳✨',
+        hashtags: ['#Altruism', '#TamilCare', '#LifePurpose'],
+        optimalDurations: [10, 15],
+      },
+      {
+        title: 'மனிதத்தின் கரம்',
+        quote: 'ஒரு மனிதன் அடையும் வெற்றியை விட, அவன் எத்தனையோ பேரைத் தூக்கிவிட்டான் என்பதே அவனது உண்மைச் சிறப்பு.',
+        explanation: 'பிறரை வாழ வைப்பதே ஒரு மனிதனின் உண்மையான பெருமை.',
+        caption: 'மனிதநேயமே பெருமை. 🤝🌟',
+        hashtags: ['#UpliftOthers', '#TamilQuotes', '#CompassionDaily'],
+        optimalDurations: [15, 20],
+      },
     ],
     en: [
       {
@@ -185,6 +250,22 @@ const ORIGINAL_QUOTES = {
         caption: 'Lifting others is the highest human purpose. ✨',
         hashtags: ['#LiftOthers', '#GoodVibes', '#Integrity', '#Selfless'],
         optimalDurations: [15, 20],
+      },
+      {
+        title: 'Common Ground',
+        quote: 'Beneath every different story, the human heart weeps for the same grief and yearns for the same tender warmth.',
+        explanation: 'Empathy begins when we recognize our shared humanity in every soul.',
+        caption: 'We are far more alike than we are different. 🕊️',
+        hashtags: ['#EmpathyFirst', '#Oneness', '#HumanFamily'],
+        optimalDurations: [15, 20],
+      },
+      {
+        title: 'The Quiet Harvest',
+        quote: 'The only wealth that outlives our quiet days is the kindness we generously left behind in others.',
+        explanation: 'Your lasting legacy is found in the lives you made brighter.',
+        caption: 'Leave kindness wherever you walk. 🌾✨',
+        hashtags: ['#Legacy', '#KindHeart', '#MeaningfulLife'],
+        optimalDurations: [10, 15, 30],
       },
     ],
   },
@@ -216,6 +297,14 @@ const ORIGINAL_QUOTES = {
         hashtags: ['#Nostalgia', '#TamilPoem', '#Echoes', '#ArtisticWords'],
         optimalDurations: [15, 20, 30],
       },
+      {
+        title: 'இரவின் ஓவியம்',
+        quote: 'நட்சத்திரங்கள் என்பவை ஆகாயத்தின் கண்களல்ல; இரவு தன் மௌனத்தை எழுதி வைத்த ரகசிய எழுத்துக்கள்.',
+        explanation: 'இரவின் அழகு சிந்தனையை ஆழமாக்கி புதிய கற்பனைகளுக்கு வித்திடுகிறது.',
+        caption: 'இரவின் அமைதியில் ஒளிரும் கவிதை. 🌌✍️',
+        hashtags: ['#NightPoem', '#TamilVerses', '#Imagination'],
+        optimalDurations: [10, 15],
+      },
     ],
     en: [
       {
@@ -233,6 +322,22 @@ const ORIGINAL_QUOTES = {
         caption: 'Words that nourish the soul. 🌧️🌱',
         hashtags: ['#PoeticThoughts', '#LiteraryVibes', '#QuietReflections'],
         optimalDurations: [15, 20],
+      },
+      {
+        title: 'The Untamed Verse',
+        quote: 'Poetry is not written to be understood by the hurried mind, but felt by the quiet heart.',
+        explanation: 'Art speaks to the inner soul when the worldly noise settles.',
+        caption: 'Felt by the quiet heart. 📜💫',
+        hashtags: ['#SoulVerse', '#PoeticSoul', '#DeepPoetry'],
+        optimalDurations: [10, 15, 20],
+      },
+      {
+        title: 'Starlight Silence',
+        quote: 'The stars do not clamor for attention; they simply shine and let the midnight sky be vast.',
+        explanation: 'True beauty radiates without needing to explain itself.',
+        caption: 'Quiet radiance in the vast night. ✨🌌',
+        hashtags: ['#Starlight', '#Serenity', '#PoetryLines'],
+        optimalDurations: [15, 20, 30],
       },
     ],
   },
@@ -264,6 +369,14 @@ const ORIGINAL_QUOTES = {
         hashtags: ['#LifeJourney', '#TrueHappiness', '#LivingInTheMoment'],
         optimalDurations: [15, 20, 30],
       },
+      {
+        title: 'எளிய வாழ்வின் இனிமை',
+        quote: 'குறைவான ஆசைகளும், நிறைந்த திருப்தியுமே மனித மனதிற்கு எட்டாத பேரானந்தத்தைத் தருகின்றன.',
+        explanation: 'தேவைகளைக் குறைத்துக்கொள்வதே மன அமைதிக்கான நேரடி வழியாகும்.',
+        caption: 'திருப்தியே வாழ்வின் செல்வம். 🌿🧘‍♂️',
+        hashtags: ['#Simplicity', '#TamilWisdom', '#Contentment'],
+        optimalDurations: [10, 15],
+      },
     ],
     en: [
       {
@@ -281,6 +394,22 @@ const ORIGINAL_QUOTES = {
         caption: 'Guard your inner calm above all else. ⚓🌊',
         hashtags: ['#InnerPeace', '#Mindfulness', '#Perspective', '#DailyReflection'],
         optimalDurations: [15, 20],
+      },
+      {
+        title: 'The Uncluttered Mind',
+        quote: 'Simplicity is not having less to live with; it is having more room for what truly matters.',
+        explanation: 'Clarity arrives when we let go of unnecessary burdens.',
+        caption: 'Space for what truly matters. 🌿🕊️',
+        hashtags: ['#Simplicity', '#Clarity', '#DeepMeaning'],
+        optimalDurations: [10, 15, 20],
+      },
+      {
+        title: 'Silent Depth',
+        quote: 'The deepest rivers always move with the least noise; greatness carries no need to shout.',
+        explanation: 'True substance and wisdom speak through quiet results, not loud boasts.',
+        caption: 'Quiet depth over noisy pretense. 🌊✨',
+        hashtags: ['#TrueStrength', '#QuietConfidence', '#WisdomDaily'],
+        optimalDurations: [15, 20, 30],
       },
     ],
   },
@@ -357,10 +486,21 @@ async function generateQuoteContent({
 
   const topicMeta = getTopicMeta(normalizedTopic);
 
+  // Extract exclusions from context (supplied by deduplication engine)
+  const excludeFingerprints = Array.isArray(context.excludeFingerprints)
+    ? context.excludeFingerprints
+    : (context.recentHistory || []).map((h) => h.fingerprint).filter(Boolean);
+
+  const excludeNumbers = Array.isArray(context.excludeNumbers)
+    ? context.excludeNumbers
+    : (context.recentHistory || [])
+        .map((h) => (h.itemIdentity?.startsWith('kural:') ? parseInt(h.itemIdentity.slice(6), 10) : null))
+        .filter(Boolean);
+
   // SPECIAL CASE: THIRUKKURAL
   // Thirukkural couplets are ALWAYS sourced from the verified authentic corpus.
   if (normalizedTopic === 'thirukkural') {
-    const kural = getAuthenticThirukkural(context.theme || 'wisdom', index);
+    const kural = getAuthenticThirukkural(context.theme || 'wisdom', index, { excludeNumbers });
 
     if (lang === 'ta') {
       return {
@@ -397,13 +537,21 @@ async function generateQuoteContent({
   const topicPool = ORIGINAL_QUOTES[normalizedTopic] || ORIGINAL_QUOTES.motivation;
   const langPool = topicPool[lang] || topicPool.ta || ORIGINAL_QUOTES.motivation.ta;
 
-  // Filter by duration affinity if available, or use entire pool
-  const durationMatches = langPool.filter((item) =>
+  // Filter out recent duplicates using computeContentFingerprint
+  const freshCandidates = langPool.filter((item) => {
+    const fp = computeContentFingerprint(item.quote);
+    return !excludeFingerprints.includes(fp);
+  });
+
+  const availablePool = freshCandidates.length > 0 ? freshCandidates : langPool;
+
+  // Filter by duration affinity if available, or use entire availablePool
+  const durationMatches = availablePool.filter((item) =>
     Array.isArray(item.optimalDurations) && item.optimalDurations.includes(dur)
   );
-  const candidatePool = durationMatches.length > 0 ? durationMatches : langPool;
+  const finalPool = durationMatches.length > 0 ? durationMatches : availablePool;
 
-  const selected = candidatePool[index % candidatePool.length];
+  const selected = finalPool[index % finalPool.length];
 
   return {
     language: lang,

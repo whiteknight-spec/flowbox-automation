@@ -23,7 +23,15 @@ export default function Activity() {
   async function loadActivity() {
     setLoading(true);
     try {
-      const { data: workflows } = await api.listWorkflows();
+      const res = await api.listWorkflows();
+      const raw = res?.data;
+      const workflows = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.workflows)
+        ? raw.workflows
+        : Array.isArray(raw?.data)
+        ? raw.data
+        : [];
       const allRuns = [];
 
       // Fetch runs for each workflow

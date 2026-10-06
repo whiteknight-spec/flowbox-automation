@@ -48,9 +48,17 @@ export default function Editor() {
   useEffect(() => {
     async function init() {
       if (paramId === 'latest') {
-        const { data } = await api.listWorkflows();
-        if (data.length > 0) {
-          navigate(`/workflows/${data[0].id}`, { replace: true });
+        const res = await api.listWorkflows();
+        const raw = res?.data;
+        const list = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.workflows)
+          ? raw.workflows
+          : Array.isArray(raw?.data)
+          ? raw.data
+          : [];
+        if (list.length > 0) {
+          navigate(`/workflows/${list[0].id}`, { replace: true });
           return;
         } else {
           const created = await api.createWorkflow({

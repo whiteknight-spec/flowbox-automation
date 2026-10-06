@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const db = require('./db');
 const { executeWorkflow } = require('./engine/executor');
+const { publishScheduledApprovedJob } = require('./publishing');
 
 let scheduledTasks = [];
 
@@ -32,6 +33,31 @@ function reloadSchedules() {
         { triggeredAt: new Date().toISOString(), workflowId: row.id, runId },
         { workflowId: row.id, runId }
       );
+
+      // Phase 6: Scheduler publishing integration for approved quote video jobs
+      const hasQuoteVideo = (definition.nodes || []).some(
+        (n) => n.type === 'quoteVideo' || n.config?.templateType === 'dailyQuoteVideo'
+      );
+      if (hasQuoteVideo) {
+        try {
+          const pubResult = await publishScheduledApprovedJob(row.id);
+          if (pubResult?.publications) {
+            result.log = result.log || [];
+            result.log.push({
+              step: 'publish_scheduled_quote_video',
+              timestamp: new Date().toISOString(),
+              data: {
+                jobId: pubResult.jobId,
+                publishStatus: pubResult.publishStatus,
+                publications: pubResult.publications,
+              },
+            });
+          }
+        } catch (pubErr) {
+          console.error(`[scheduler] Scheduled publishing failed for workflow ${row.id}:`, pubErr.message);
+        }
+      }
+
       db.prepare('UPDATE runs SET status = ?, log = ?, finished_at = datetime("now") WHERE id = ?')
         .run(result.status, JSON.stringify(result.log), runId);
     });

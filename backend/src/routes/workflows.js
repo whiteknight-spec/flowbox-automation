@@ -96,7 +96,13 @@ const {
   getQuoteJobById,
   listQuoteJobs,
   renderQuoteVideoJob,
+  approveQuoteVideoJob,
+  regenerateQuoteVideoJob,
 } = require('../contentEngine');
+const {
+  publishQuoteVideoJob,
+  getJobPublications,
+} = require('../publishing');
 const { streamVideoFile } = require('./quoteVideoJobs');
 
 // Manually trigger a run (used by the "Run" button in the editor / dashboard)
@@ -172,6 +178,45 @@ router.post('/:id/quote-jobs/:jobId/render', async (req, res) => {
   }
 });
 
+// Approve quote job for workflow
+router.post('/:id/quote-jobs/:jobId/approve', async (req, res) => {
+  const job = getQuoteJobById(req.params.jobId);
+  if (!job || job.workflow_id !== req.params.id) {
+    return res.status(404).json({ error: 'Quote video job not found for this workflow' });
+  }
+  try {
+    const result = await approveQuoteVideoJob(req.params.jobId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    console.error(`[workflow approve API] Failed approving job ${req.params.jobId}:`, err.message);
+    const status = err.statusCode || 400;
+    res.status(status).json({
+      error: 'Approval failed',
+      reviewStatus: err.reviewStatus,
+      message: err.message,
+    });
+  }
+});
+
+// Regenerate quote job for workflow
+router.post('/:id/quote-jobs/:jobId/regenerate', async (req, res) => {
+  const job = getQuoteJobById(req.params.jobId);
+  if (!job || job.workflow_id !== req.params.id) {
+    return res.status(404).json({ error: 'Quote video job not found for this workflow' });
+  }
+  try {
+    const result = await regenerateQuoteVideoJob(req.params.jobId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    console.error(`[workflow regenerate API] Failed regenerating job ${req.params.jobId}:`, err.message);
+    const status = err.statusCode || 500;
+    res.status(status).json({
+      error: 'Regeneration failed',
+      message: err.message,
+    });
+  }
+});
+
 // Stream rendered video MP4 for workflow job
 router.get('/:id/quote-jobs/:jobId/video', (req, res) => {
   const job = getQuoteJobById(req.params.jobId);
@@ -185,6 +230,42 @@ router.get('/:id/quote-jobs/:jobId/video', (req, res) => {
     });
   }
   streamVideoFile(job.outputPath, req, res);
+});
+
+// Publish approved quote job for workflow
+router.post('/:id/quote-jobs/:jobId/publish', async (req, res) => {
+  const job = getQuoteJobById(req.params.jobId);
+  if (!job || job.workflow_id !== req.params.id) {
+    return res.status(404).json({ error: 'Quote video job not found for this workflow' });
+  }
+  try {
+    const result = await publishQuoteVideoJob(req.params.jobId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    console.error(`[workflow publish API] Failed publishing job ${req.params.jobId}:`, err.message);
+    const status = err.statusCode || 400;
+    res.status(status).json({
+      error: 'Publishing failed',
+      reviewStatus: err.reviewStatus,
+      message: err.message,
+    });
+  }
+});
+
+// Get publication history for workflow job
+router.get('/:id/quote-jobs/:jobId/publications', (req, res) => {
+  const job = getQuoteJobById(req.params.jobId);
+  if (!job || job.workflow_id !== req.params.id) {
+    return res.status(404).json({ error: 'Quote video job not found for this workflow' });
+  }
+  const publications = getJobPublications(req.params.jobId);
+  res.json({
+    jobId: req.params.jobId,
+    publishStatus: job.publishStatus,
+    publishedAt: job.publishedAt,
+    publishError: job.publishError,
+    publications,
+  });
 });
 
 // Get latest quote preparation job for workflow

@@ -22,10 +22,12 @@ import {
   Bell,
   Table,
   Globe,
+  Film,
 } from 'lucide-react';
 import Navbar from '../components/Navbar.jsx';
 import AutomationWizard from '../components/AutomationWizard.jsx';
 import QuoteVideoWizard from '../components/QuoteVideoWizard.jsx';
+import QuoteVideoReviewModal from '../components/QuoteVideoReviewModal.jsx';
 import { api } from '../api.js';
 import { parseAutomationIntent } from '../utils/intentParser.js';
 import { AUTOMATION_TEMPLATES } from '../utils/templateDefinitions.js';
@@ -47,32 +49,48 @@ export default function Dashboard() {
   const [toastMessage, setToastMessage] = useState(null);
   const [quoteJobs, setQuoteJobs] = useState({});
   const [preparingQuoteId, setPreparingQuoteId] = useState(null);
+  const [renderingJobId, setRenderingJobId] = useState(null);
+  const [previewVideoJob, setPreviewVideoJob] = useState(null);
 
   const navigate = useNavigate();
 
   // Load workflows
   async function loadWorkflows() {
     try {
-      const { data } = await api.listWorkflows();
-      setWorkflows(data);
+      const res = await api.listWorkflows();
+      const raw = res?.data;
+      const list = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.workflows)
+        ? raw.workflows
+        : Array.isArray(raw?.data)
+        ? raw.data
+        : [];
+      setWorkflows(list);
 
       // Fetch latest quote preparation job for quote video workflows
-      for (const wf of data) {
-        const isQuote =
-          wf.name === 'Daily Quote Video' ||
-          wf.definition?.nodes?.some(
-            (n) => n.config?.templateType === 'dailyQuoteVideo' || n.type === 'quoteVideo'
-          );
-        if (isQuote) {
-          api
-            .getLatestQuoteJob(wf.id)
-            .then((res) => {
-              if (res.data?.job) {
-                setQuoteJobs((prev) => ({ ...prev, [wf.id]: res.data.job }));
-              }
-            })
-            .catch(() => {});
-        }
+      for (const wf of list) {
+        try {
+          let def = wf.definition;
+          if (typeof def === 'string') {
+            try { def = JSON.parse(def); } catch (_) {}
+          }
+          const isQuote =
+            wf.name === 'Daily Quote Video' ||
+            def?.nodes?.some(
+              (n) => n.config?.templateType === 'dailyQuoteVideo' || n.type === 'quoteVideo'
+            );
+          if (isQuote) {
+            api
+              .getLatestQuoteJob(wf.id)
+              .then((jobRes) => {
+                if (jobRes?.data?.job) {
+                  setQuoteJobs((prev) => ({ ...prev, [wf.id]: jobRes.data.job }));
+                }
+              })
+              .catch(() => {});
+          }
+        } catch (_) {}
       }
     } catch (err) {
       console.error('Failed to load workflows', err);
@@ -93,6 +111,27 @@ export default function Dashboard() {
       showToast('Failed to prepare quote: ' + (err.response?.data?.details || err.message));
     } finally {
       setPreparingQuoteId(null);
+    }
+  }
+
+  // Render Quote Video MP4
+  async function handleRenderVideo(wf, job, force = false) {
+    if (!job || !wf) return;
+    setRenderingJobId(job.id);
+    showToast('Rendering 1080×1920 MP4 video…');
+    try {
+      const res = await api.renderQuoteJob(wf.id, job.id, { force });
+      const updatedJob = { ...job, ...res.data };
+      setQuoteJobs((prev) => ({ ...prev, [wf.id]: updatedJob }));
+      showToast('🎬 Video rendered successfully! (1080×1920 MP4)');
+    } catch (err) {
+      const errMsg = err.response?.data?.details || err.message;
+      showToast('Render failed: ' + errMsg);
+      api.getLatestQuoteJob(wf.id).then((r) => {
+        if (r.data?.job) setQuoteJobs((prev) => ({ ...prev, [wf.id]: r.data.job }));
+      }).catch(() => {});
+    } finally {
+      setRenderingJobId(null);
     }
   }
 
@@ -202,17 +241,17 @@ export default function Dashboard() {
 
   // Filter and Search Workflows
   const filteredWorkflows = useMemo(() => {
-    return workflows.filter((wf) => {
+    return (workflows || []).filter((wf) => {
       const matchesFilter =
         filter === 'all'
           ? true
           : filter === 'active'
-          ? wf.active
+          ? Boolean(wf.active)
           : !wf.active;
 
       const matchesSearch =
         !searchQuery ||
-        wf.name.toLowerCase().includes(searchQuery.toLowerCase());
+        (wf.name || '').toLowerCase().includes(searchQuery.toLowerCase());
 
       return matchesFilter && matchesSearch;
     });
@@ -487,19 +526,19 @@ export default function Dashboard() {
                   className={`filter-tab ${filter === 'all' ? 'active' : ''}`}
                   onClick={() => setFilter('all')}
                 >
-                  All ({workflows.length})
+                  All ({(workflows || []).length})
                 </button>
                 <button
                   className={`filter-tab ${filter === 'active' ? 'active' : ''}`}
                   onClick={() => setFilter('active')}
                 >
-                  Active ({workflows.filter((w) => w.active).length})
+                  Active ({(workflows || []).filter((w) => Boolean(w.active)).length})
                 </button>
                 <button
                   className={`filter-tab ${filter === 'paused' ? 'active' : ''}`}
                   onClick={() => setFilter('paused')}
                 >
-                  Paused ({workflows.filter((w) => !w.active).length})
+                  Paused ({(workflows || []).filter((w) => !w.active).length})
                 </button>
               </div>
 
@@ -515,7 +554,12 @@ export default function Dashboard() {
             </div>
 
             {/* Automations List */}
-            {filteredWorkflows.length > 0 ? (
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+                <RotateCw className="spin" size={24} style={{ margin: '0 auto 12px', display: 'block' }} />
+                <p style={{ margin: 0, fontSize: 14 }}>Loading automations…</p>
+              </div>
+            ) : filteredWorkflows.length > 0 ? (
               <div className="automations-list">
                 {filteredWorkflows.map((wf) => {
                   const summary = summarizeWorkflow(wf);
@@ -678,16 +722,91 @@ export default function Dashboard() {
                                   {prepJob.spec?.topic?.emoji || '🔥'} {prepJob.spec?.topic?.label || prepJob.topic}
                                 </span>
                               </div>
-                              <button
-                                className="btn-secondary"
-                                style={{ padding: '4px 10px', fontSize: 12 }}
-                                disabled={preparingQuoteId === wf.id}
-                                onClick={() => handlePrepareNextQuote(wf)}
-                                title="Advance rotation and prepare next quote"
-                              >
-                                <RotateCw className={preparingQuoteId === wf.id ? 'spin' : ''} size={12} />
-                                <span>{preparingQuoteId === wf.id ? 'Preparing…' : 'Prepare next quote'}</span>
-                              </button>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                {prepJob.reviewStatus === 'approved' || prepJob.review_status === 'approved' ? (
+                                  <button
+                                    className="btn-gradient"
+                                    style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+                                    onClick={() => setPreviewVideoJob(prepJob)}
+                                    title="Preview approved video"
+                                  >
+                                    <Film size={13} />
+                                    <span>Preview</span>
+                                  </button>
+                                ) : prepJob.renderStatus === 'rendered' ? (
+                                  <>
+                                    <button
+                                      className="btn-gradient"
+                                      style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+                                      onClick={() => setPreviewVideoJob(prepJob)}
+                                      title="Preview rendered 1080×1920 MP4 video"
+                                    >
+                                      <Film size={13} />
+                                      <span>Preview</span>
+                                    </button>
+                                    <button
+                                      className="btn-secondary"
+                                      style={{ padding: '4px 10px', fontSize: 12 }}
+                                      disabled={renderingJobId === prepJob.id}
+                                      onClick={() => handleRenderVideo(wf, prepJob, true)}
+                                      title="Re-render video"
+                                    >
+                                      <RotateCw className={renderingJobId === prepJob.id ? 'spin' : ''} size={12} />
+                                      <span>{renderingJobId === prepJob.id ? 'Rendering…' : 'Re-render'}</span>
+                                    </button>
+                                  </>
+                                ) : prepJob.renderStatus === 'rendering' || renderingJobId === prepJob.id ? (
+                                  <button
+                                    className="btn-secondary"
+                                    style={{ padding: '5px 12px', fontSize: 12, opacity: 0.8 }}
+                                    disabled
+                                  >
+                                    <RotateCw className="spin" size={12} />
+                                    <span>Rendering…</span>
+                                  </button>
+                                ) : prepJob.renderStatus === 'render_failed' ? (
+                                  <button
+                                    className="btn-secondary"
+                                    style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, color: '#f87171' }}
+                                    onClick={() => handleRenderVideo(wf, prepJob, true)}
+                                    title="Retry video rendering"
+                                  >
+                                    <RotateCw size={12} />
+                                    <span>Retry Render</span>
+                                  </button>
+                                ) : prepJob.renderStatus === 'requires_review' ? (
+                                  <button
+                                    className="btn-secondary"
+                                    style={{ padding: '5px 12px', fontSize: 12, color: 'var(--gold-bright)' }}
+                                    disabled
+                                    title={prepJob.errorMessage || 'Tamil content requires human linguistic review'}
+                                  >
+                                    <span>⚠️ Review Required</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    className="btn-gradient"
+                                    style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+                                    disabled={renderingJobId === prepJob.id}
+                                    onClick={() => handleRenderVideo(wf, prepJob)}
+                                    title="Render video MP4"
+                                  >
+                                    <Film size={13} />
+                                    <span>Render Video</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  className="btn-secondary"
+                                  style={{ padding: '4px 10px', fontSize: 12 }}
+                                  disabled={preparingQuoteId === wf.id}
+                                  onClick={() => handlePrepareNextQuote(wf)}
+                                  title="Advance rotation and prepare next quote"
+                                >
+                                  <RotateCw className={preparingQuoteId === wf.id ? 'spin' : ''} size={12} />
+                                  <span>{preparingQuoteId === wf.id ? 'Preparing…' : 'Prepare next'}</span>
+                                </button>
+                              </div>
                             </div>
 
                             <div className="quote-prep-body">
@@ -702,19 +821,48 @@ export default function Dashboard() {
                               <span className="quote-prep-chip">📐 1080 × 1920 (9:16)</span>
                               <span className="quote-prep-chip">📱 Instagram + YouTube Shorts</span>
                               <span className="quote-prep-chip">
-                                🎨 Visual: {prepJob.visualStrategy?.style || prepJob.spec?.visual?.style || 'Adaptive'}
+                                🎨 Visual: {prepJob.visualStrategy?.visualTitle || prepJob.visualStrategy?.style || prepJob.spec?.visual?.style || 'Adaptive'}
                               </span>
                               <span className="quote-prep-chip">
                                 🎵 Audio: {prepJob.audioStrategy?.preference === 'none' ? 'Silent' : 'Approved Ambient'}
                               </span>
-                              {prepJob.renderStatus === 'rendered' ? (
-                                <span className="quote-prep-chip success">🎬 Video: Rendered (MP4)</span>
-                              ) : prepJob.renderStatus === 'rendering' ? (
+                              {prepJob.publishStatus === 'published' || prepJob.publish_status === 'published' ? (
+                                <span
+                                  className="quote-prep-chip success"
+                                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                                  onClick={() => setPreviewVideoJob(prepJob)}
+                                  title="Click to view published details"
+                                >
+                                  <CheckCircle2 size={12} color="var(--neon-green)" /> Video: Published
+                                </span>
+                              ) : prepJob.reviewStatus === 'approved' || prepJob.review_status === 'approved' ? (
+                                <span
+                                  className="quote-prep-chip success"
+                                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                                  onClick={() => setPreviewVideoJob(prepJob)}
+                                  title="Click to open video preview & publish"
+                                >
+                                  <CheckCircle2 size={12} color="var(--neon-green)" /> Video: Approved
+                                </span>
+                              ) : prepJob.renderStatus === 'rendered' ? (
+                                <span
+                                  className="quote-prep-chip success"
+                                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                                  onClick={() => setPreviewVideoJob(prepJob)}
+                                  title="Click to preview video"
+                                >
+                                  <Film size={11} /> Video: Ready for review
+                                </span>
+                              ) : prepJob.renderStatus === 'rendering' || renderingJobId === prepJob.id ? (
                                 <span className="quote-prep-chip info">⏳ Video: Rendering…</span>
                               ) : prepJob.renderStatus === 'requires_review' ? (
-                                <span className="quote-prep-chip warning">⚠️ Needs Review</span>
+                                <span className="quote-prep-chip warning" title={prepJob.errorMessage}>
+                                  ⚠️ Tamil Review Required
+                                </span>
                               ) : prepJob.renderStatus === 'render_failed' ? (
-                                <span className="quote-prep-chip danger">❌ Video: Render Failed</span>
+                                <span className="quote-prep-chip danger" title={prepJob.errorMessage || 'Render failed'}>
+                                  ❌ Video: Render failed
+                                </span>
                               ) : (
                                 <span className="quote-prep-chip warning">🎬 Video: Not rendered yet</span>
                               )}
@@ -805,6 +953,35 @@ export default function Dashboard() {
           showToast(`Saved "${newWf.name}"!`);
         }}
       />
+
+      {/* Consumer-Friendly Quote Video Review & Preview Modal */}
+      {previewVideoJob && (
+        <QuoteVideoReviewModal
+          job={previewVideoJob}
+          onClose={() => {
+            setPreviewVideoJob(null);
+            loadWorkflows();
+          }}
+          onJobUpdated={(updatedJob) => {
+            setPreviewVideoJob(updatedJob);
+            const targetWfId = updatedJob.workflow_id || updatedJob.workflowId;
+            if (targetWfId) {
+              setQuoteJobs((prev) => ({ ...prev, [targetWfId]: updatedJob }));
+            } else {
+              setQuoteJobs((prev) => {
+                const next = { ...prev };
+                for (const [wId, j] of Object.entries(prev)) {
+                  if (j?.id === updatedJob.id || j?.id === updatedJob.parentJobId) {
+                    next[wId] = updatedJob;
+                  }
+                }
+                return next;
+              });
+            }
+            loadWorkflows();
+          }}
+        />
+      )}
 
       {/* Toast Feedback */}
       {toastMessage && (

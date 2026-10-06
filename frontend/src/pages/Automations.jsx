@@ -13,11 +13,13 @@ import {
   RotateCw,
   CheckCircle2,
   Film,
+  Sparkles,
   X,
 } from 'lucide-react';
 import Navbar from '../components/Navbar.jsx';
 import AutomationWizard from '../components/AutomationWizard.jsx';
 import QuoteVideoWizard from '../components/QuoteVideoWizard.jsx';
+import QuoteVideoReviewModal from '../components/QuoteVideoReviewModal.jsx';
 import { api } from '../api.js';
 import { summarizeWorkflow } from '../utils/workflowSummarizer.js';
 
@@ -42,25 +44,39 @@ export default function Automations() {
 
   async function loadWorkflows() {
     try {
-      const { data } = await api.listWorkflows();
-      setWorkflows(data);
+      const res = await api.listWorkflows();
+      const raw = res?.data;
+      const list = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.workflows)
+        ? raw.workflows
+        : Array.isArray(raw?.data)
+        ? raw.data
+        : [];
+      setWorkflows(list);
 
-      for (const wf of data) {
-        const isQuote =
-          wf.name === 'Daily Quote Video' ||
-          wf.definition?.nodes?.some(
-            (n) => n.config?.templateType === 'dailyQuoteVideo' || n.type === 'quoteVideo'
-          );
-        if (isQuote) {
-          api
-            .getLatestQuoteJob(wf.id)
-            .then((res) => {
-              if (res.data?.job) {
-                setQuoteJobs((prev) => ({ ...prev, [wf.id]: res.data.job }));
-              }
-            })
-            .catch(() => {});
-        }
+      for (const wf of list) {
+        try {
+          let def = wf.definition;
+          if (typeof def === 'string') {
+            try { def = JSON.parse(def); } catch (_) {}
+          }
+          const isQuote =
+            wf.name === 'Daily Quote Video' ||
+            def?.nodes?.some(
+              (n) => n.config?.templateType === 'dailyQuoteVideo' || n.type === 'quoteVideo'
+            );
+          if (isQuote) {
+            api
+              .getLatestQuoteJob(wf.id)
+              .then((jobRes) => {
+                if (jobRes?.data?.job) {
+                  setQuoteJobs((prev) => ({ ...prev, [wf.id]: jobRes.data.job }));
+                }
+              })
+              .catch(() => {});
+          }
+        } catch (_) {}
       }
     } catch (err) {
       console.error(err);
@@ -167,17 +183,17 @@ export default function Automations() {
   }
 
   const filtered = useMemo(() => {
-    return workflows.filter((wf) => {
+    return (workflows || []).filter((wf) => {
       const matchesFilter =
         filter === 'all'
           ? true
           : filter === 'active'
-          ? wf.active
+          ? Boolean(wf.active)
           : !wf.active;
 
       const matchesSearch =
         !searchQuery ||
-        wf.name.toLowerCase().includes(searchQuery.toLowerCase());
+        (wf.name || '').toLowerCase().includes(searchQuery.toLowerCase());
 
       return matchesFilter && matchesSearch;
     });
@@ -222,19 +238,19 @@ export default function Automations() {
                 className={`filter-tab ${filter === 'all' ? 'active' : ''}`}
                 onClick={() => setFilter('all')}
               >
-                All ({workflows.length})
+                All ({(workflows || []).length})
               </button>
               <button
                 className={`filter-tab ${filter === 'active' ? 'active' : ''}`}
                 onClick={() => setFilter('active')}
               >
-                Active ({workflows.filter((w) => w.active).length})
+                Active ({(workflows || []).filter((w) => Boolean(w.active)).length})
               </button>
               <button
                 className={`filter-tab ${filter === 'paused' ? 'active' : ''}`}
                 onClick={() => setFilter('paused')}
               >
-                Paused ({workflows.filter((w) => !w.active).length})
+                Paused ({(workflows || []).filter((w) => !w.active).length})
               </button>
             </div>
 
@@ -249,7 +265,12 @@ export default function Automations() {
             </div>
           </div>
 
-          {filtered.length > 0 ? (
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+              <RotateCw className="spin" size={24} style={{ margin: '0 auto 12px', display: 'block' }} />
+              <p style={{ margin: 0, fontSize: 14 }}>Loading automations…</p>
+            </div>
+          ) : filtered.length > 0 ? (
             <div className="automations-list">
               {filtered.map((wf) => {
                 const summary = summarizeWorkflow(wf);
@@ -406,7 +427,17 @@ export default function Automations() {
                               </span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              {prepJob.renderStatus === 'rendered' ? (
+                              {prepJob.reviewStatus === 'approved' || prepJob.review_status === 'approved' ? (
+                                <button
+                                  className="btn-gradient"
+                                  style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+                                  onClick={() => setPreviewVideoJob(prepJob)}
+                                  title="Preview approved video"
+                                >
+                                  <Film size={13} />
+                                  <span>Preview</span>
+                                </button>
+                              ) : prepJob.renderStatus === 'rendered' ? (
                                 <>
                                   <button
                                     className="btn-gradient"
@@ -415,7 +446,7 @@ export default function Automations() {
                                     title="Preview rendered 1080×1920 MP4 video"
                                   >
                                     <Film size={13} />
-                                    <span>Preview Video</span>
+                                    <span>Preview</span>
                                   </button>
                                   <button
                                     className="btn-secondary"
@@ -435,7 +466,17 @@ export default function Automations() {
                                   disabled
                                 >
                                   <RotateCw className="spin" size={12} />
-                                  <span>Rendering MP4…</span>
+                                  <span>Rendering…</span>
+                                </button>
+                              ) : prepJob.renderStatus === 'render_failed' ? (
+                                <button
+                                  className="btn-secondary"
+                                  style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, color: '#f87171' }}
+                                  onClick={() => handleRenderVideo(wf, prepJob, true)}
+                                  title="Retry video rendering"
+                                >
+                                  <RotateCw size={12} />
+                                  <span>Retry Render</span>
                                 </button>
                               ) : prepJob.renderStatus === 'requires_review' ? (
                                 <button
@@ -484,29 +525,47 @@ export default function Automations() {
                             <span className="quote-prep-chip">📐 1080 × 1920 (9:16)</span>
                             <span className="quote-prep-chip">📱 Instagram + YouTube Shorts</span>
                             <span className="quote-prep-chip">
-                              🎨 Visual: {prepJob.visualStrategy?.style || prepJob.spec?.visual?.style || 'Adaptive'}
+                              🎨 Visual: {prepJob.visualStrategy?.visualTitle || prepJob.visualStrategy?.style || prepJob.spec?.visual?.style || 'Adaptive'}
                             </span>
                             <span className="quote-prep-chip">
                               🎵 Audio: {prepJob.audioStrategy?.preference === 'none' ? 'Silent' : 'Approved Ambient'}
                             </span>
-                            {prepJob.renderStatus === 'rendered' ? (
+                            {prepJob.publishStatus === 'published' || prepJob.publish_status === 'published' ? (
+                              <span
+                                className="quote-prep-chip success"
+                                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                                onClick={() => setPreviewVideoJob(prepJob)}
+                                title="Click to view published details"
+                              >
+                                <CheckCircle2 size={12} color="var(--neon-green)" /> Video: Published
+                              </span>
+                            ) : prepJob.reviewStatus === 'approved' || prepJob.review_status === 'approved' ? (
+                              <span
+                                className="quote-prep-chip success"
+                                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                                onClick={() => setPreviewVideoJob(prepJob)}
+                                title="Click to open video preview & publish"
+                              >
+                                <CheckCircle2 size={12} color="var(--neon-green)" /> Video: Approved
+                              </span>
+                            ) : prepJob.renderStatus === 'rendered' ? (
                               <span
                                 className="quote-prep-chip success"
                                 style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
                                 onClick={() => setPreviewVideoJob(prepJob)}
                                 title="Click to preview video"
                               >
-                                <Film size={11} /> 🎬 Video: Rendered (MP4)
+                                <Film size={11} /> Video: Ready for review
                               </span>
                             ) : prepJob.renderStatus === 'rendering' || renderingJobId === prepJob.id ? (
-                              <span className="quote-prep-chip info">⏳ Video: Rendering MP4…</span>
+                              <span className="quote-prep-chip info">⏳ Video: Rendering…</span>
                             ) : prepJob.renderStatus === 'requires_review' ? (
                               <span className="quote-prep-chip warning" title={prepJob.errorMessage}>
                                 ⚠️ Tamil Review Required
                               </span>
                             ) : prepJob.renderStatus === 'render_failed' ? (
                               <span className="quote-prep-chip danger" title={prepJob.errorMessage || 'Render failed'}>
-                                ❌ Video: Render Failed
+                                ❌ Video: Render failed
                               </span>
                             ) : (
                               <span className="quote-prep-chip warning">🎬 Video: Not rendered yet</span>
@@ -595,79 +654,33 @@ export default function Automations() {
         }}
       />
 
-      {/* RENDERED VIDEO PREVIEW MODAL */}
+      {/* Consumer-Friendly Quote Video Review & Preview Modal */}
       {previewVideoJob && (
-        <div className="quote-video-modal-backdrop" onClick={() => setPreviewVideoJob(null)}>
-          <div className="quote-video-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="quote-video-modal-header">
-              <div className="quote-video-modal-title">
-                <Film size={16} color="var(--neon-green)" />
-                <span>Daily Quote Video Preview • {previewVideoJob.language === 'ta' ? 'Tamil' : 'English'}</span>
-              </div>
-              <button
-                className="btn-icon"
-                onClick={() => setPreviewVideoJob(null)}
-                style={{ width: 28, height: 28, padding: 0 }}
-                title="Close preview"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="quote-video-player-wrap">
-              <video
-                className="quote-video-element"
-                controls
-                autoPlay
-                playsInline
-                key={previewVideoJob.id}
-                src={api.getVideoUrl(previewVideoJob.id)}
-              >
-                Your browser does not support HTML5 video preview.
-              </video>
-            </div>
-
-            <div className="quote-video-modal-footer">
-              <div className="quote-video-meta-grid">
-                <div className="quote-video-meta-item">
-                  <div className="quote-video-meta-label">Duration</div>
-                  <div className="quote-video-meta-val">{previewVideoJob.duration || 15}s</div>
-                </div>
-                <div className="quote-video-meta-item">
-                  <div className="quote-video-meta-label">Resolution</div>
-                  <div className="quote-video-meta-val">
-                    {previewVideoJob.width || 1080}×{previewVideoJob.height || 1920}
-                  </div>
-                </div>
-                <div className="quote-video-meta-item">
-                  <div className="quote-video-meta-label">Format</div>
-                  <div className="quote-video-meta-val">H.264 MP4</div>
-                </div>
-                <div className="quote-video-meta-item">
-                  <div className="quote-video-meta-label">File Size</div>
-                  <div className="quote-video-meta-val">
-                    {previewVideoJob.fileSize
-                      ? `${(previewVideoJob.fileSize / (1024 * 1024)).toFixed(1)} MB`
-                      : 'Rendered'}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                <span style={{ fontSize: 11, color: '#64748b' }}>
-                  🔒 Local storage • Ready for social publishing in future phase
-                </span>
-                <button
-                  className="btn-secondary"
-                  style={{ fontSize: 12, padding: '4px 12px' }}
-                  onClick={() => setPreviewVideoJob(null)}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <QuoteVideoReviewModal
+          job={previewVideoJob}
+          onClose={() => {
+            setPreviewVideoJob(null);
+            loadWorkflows();
+          }}
+          onJobUpdated={(updatedJob) => {
+            setPreviewVideoJob(updatedJob);
+            const targetWfId = updatedJob.workflow_id || updatedJob.workflowId;
+            if (targetWfId) {
+              setQuoteJobs((prev) => ({ ...prev, [targetWfId]: updatedJob }));
+            } else {
+              setQuoteJobs((prev) => {
+                const next = { ...prev };
+                for (const [wId, j] of Object.entries(prev)) {
+                  if (j?.id === updatedJob.id || j?.id === updatedJob.parentJobId) {
+                    next[wId] = updatedJob;
+                  }
+                }
+                return next;
+              });
+            }
+            loadWorkflows();
+          }}
+        />
       )}
 
       {toastMessage && (

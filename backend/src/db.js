@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 
-const dbPath = process.env.DB_PATH || './data/flowbox.sqlite';
+const dbPath = process.env.DB_PATH || path.resolve(__dirname, '../data/flowbox.sqlite');
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const db = new Database(dbPath);
@@ -82,6 +82,44 @@ CREATE TABLE IF NOT EXISTS quote_topic_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_quote_topic_state ON quote_topic_state(workflow_id);
+
+CREATE TABLE IF NOT EXISTS quote_content_history (
+  id TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  topic TEXT NOT NULL,
+  language TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  item_identity TEXT,
+  quote_preview TEXT,
+  job_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_history_scoped
+  ON quote_content_history(workflow_id, topic, language, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_content_history_topic
+  ON quote_content_history(workflow_id, topic, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_content_history_fp
+  ON quote_content_history(workflow_id, fingerprint);
+
+-- Phase 6: Multi-platform publishing history
+CREATE TABLE IF NOT EXISTS quote_video_publications (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL REFERENCES quote_video_jobs(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL,          -- 'instagram' | 'youtube'
+  status TEXT NOT NULL,            -- 'scheduled' | 'publishing' | 'published' | 'publish_failed' | 'simulated'
+  external_post_id TEXT,
+  external_url TEXT,
+  published_at TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_quote_pubs_job
+  ON quote_video_publications(job_id, platform);
 `);
 
 // Safe migrations for newly added columns on existing SQLite databases
@@ -93,6 +131,14 @@ const quoteJobColumns = [
   ['height', 'INTEGER'],
   ['file_size', 'INTEGER'],
   ['error_message', 'TEXT'],
+  ['review_status', "TEXT DEFAULT 'not_rendered'"],
+  ['reviewed_at', 'TEXT'],
+  ['reviewed_by', 'TEXT'],
+  ['parent_job_id', 'TEXT'],
+  ['version', 'INTEGER DEFAULT 1'],
+  ['publish_status', "TEXT DEFAULT 'not_scheduled'"],
+  ['published_at', 'TEXT'],
+  ['publish_error', 'TEXT'],
 ];
 for (const [col, colType] of quoteJobColumns) {
   try {

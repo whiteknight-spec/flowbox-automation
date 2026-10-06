@@ -23,9 +23,11 @@ const { selectAudioStrategy, TOPIC_AUDIO_GENRES } = require('./audioStrategy');
 const {
   prepareDailyQuoteVideo,
   getLatestQuoteJob,
+  getLatestRootQuoteJob,
   getQuoteJobById,
   listQuoteJobs,
   getQuoteJobCount,
+  getRootQuoteJobCount,
   getTopicPreviousLanguage,
   getTopicLanguageState,
   saveTopicLanguageState,
@@ -39,14 +41,30 @@ const {
   resolveApprovedAudio,
   STORAGE_BASE,
 } = require('./videoRenderer');
+const {
+  approveQuoteVideoJob,
+  regenerateQuoteVideoJob,
+} = require('./reviewManager');
+const {
+  normalizeContentText,
+  computeContentFingerprint,
+  resolveDedupWindow,
+  recordAcceptedContent,
+  getRecentContentHistory,
+  isContentDuplicate,
+  clearContentHistory,
+  DEFAULT_CONTENT_DEDUP_WINDOW,
+} = require('./contentDeduplication');
 
 module.exports = {
   // Main pipeline execution & rendering
   prepareDailyQuoteVideo,
   getLatestQuoteJob,
+  getLatestRootQuoteJob,
   getQuoteJobById,
   listQuoteJobs,
   getQuoteJobCount,
+  getRootQuoteJobCount,
   getTopicPreviousLanguage,
   getTopicLanguageState,
   saveTopicLanguageState,
@@ -57,6 +75,10 @@ module.exports = {
   createExplanationOverlayCanvas,
   resolveApprovedAudio,
   STORAGE_BASE,
+
+  // Phase 5: Video Preview & Approval System
+  approveQuoteVideoJob,
+  regenerateQuoteVideoJob,
 
   // Modular components
   resolveLanguage,
@@ -87,4 +109,14 @@ module.exports = {
 
   selectAudioStrategy,
   TOPIC_AUDIO_GENRES,
+
+  // Content Deduplication & History
+  normalizeContentText,
+  computeContentFingerprint,
+  resolveDedupWindow,
+  recordAcceptedContent,
+  getRecentContentHistory,
+  isContentDuplicate,
+  clearContentHistory,
+  DEFAULT_CONTENT_DEDUP_WINDOW,
 };

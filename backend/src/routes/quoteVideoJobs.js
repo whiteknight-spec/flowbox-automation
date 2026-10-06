@@ -1,7 +1,18 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { getQuoteJobById, renderQuoteVideoJob, STORAGE_BASE } = require('../contentEngine');
+const {
+  getQuoteJobById,
+  renderQuoteVideoJob,
+  approveQuoteVideoJob,
+  regenerateQuoteVideoJob,
+  STORAGE_BASE,
+} = require('../contentEngine');
+const {
+  publishQuoteVideoJob,
+  getJobPublications,
+  getPublishingConfiguration,
+} = require('../publishing');
 
 const router = express.Router();
 
@@ -85,6 +96,43 @@ router.post('/:jobId/render', async (req, res) => {
 });
 
 /**
+ * POST /api/quote-video-jobs/:jobId/approve
+ * Approves a rendered quote video job after safety verification.
+ */
+router.post('/:jobId/approve', async (req, res) => {
+  try {
+    const result = await approveQuoteVideoJob(req.params.jobId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    console.error(`[approve API] Failed approving job ${req.params.jobId}:`, err.message);
+    const status = err.statusCode || 400;
+    res.status(status).json({
+      error: 'Approval failed',
+      reviewStatus: err.reviewStatus,
+      message: err.message,
+    });
+  }
+});
+
+/**
+ * POST /api/quote-video-jobs/:jobId/regenerate
+ * Triggers a controlled regeneration for a quote video job, preserving history.
+ */
+router.post('/:jobId/regenerate', async (req, res) => {
+  try {
+    const result = await regenerateQuoteVideoJob(req.params.jobId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    console.error(`[regenerate API] Failed regenerating job ${req.params.jobId}:`, err.message);
+    const status = err.statusCode || 500;
+    res.status(status).json({
+      error: 'Regeneration failed',
+      message: err.message,
+    });
+  }
+});
+
+/**
  * GET /api/quote-video-jobs/:jobId/video
  * Streams the rendered MP4 video.
  */
@@ -100,6 +148,51 @@ router.get('/:jobId/video', (req, res) => {
   }
 
   streamVideoFile(job.outputPath, req, res);
+});
+
+/**
+ * GET /api/quote-video-jobs/publishing/status
+ * Returns current configuration status for publishing providers.
+ */
+router.get('/publishing/status', (req, res) => {
+  const config = getPublishingConfiguration();
+  res.json(config);
+});
+
+/**
+ * POST /api/quote-video-jobs/:jobId/publish
+ * Publishes an approved quote video job to social platforms.
+ */
+router.post('/:jobId/publish', async (req, res) => {
+  try {
+    const result = await publishQuoteVideoJob(req.params.jobId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    console.error(`[publish API] Failed publishing job ${req.params.jobId}:`, err.message);
+    const status = err.statusCode || 400;
+    res.status(status).json({
+      error: 'Publishing failed',
+      reviewStatus: err.reviewStatus,
+      message: err.message,
+    });
+  }
+});
+
+/**
+ * GET /api/quote-video-jobs/:jobId/publications
+ * Retrieves multi-platform publication records and history for a job.
+ */
+router.get('/:jobId/publications', (req, res) => {
+  const job = getQuoteJobById(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Quote video job not found' });
+  const publications = getJobPublications(req.params.jobId);
+  res.json({
+    jobId: req.params.jobId,
+    publishStatus: job.publishStatus,
+    publishedAt: job.publishedAt,
+    publishError: job.publishError,
+    publications,
+  });
 });
 
 module.exports = {

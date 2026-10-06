@@ -21,10 +21,18 @@ const crypto = require('crypto');
 const db = require('../db');
 const { resolveLanguage, resolveLanguageForTopic, getLanguageMeta } = require('./languageRotation');
 const { resolveTopic, getTopicMeta } = require('./topicRotation');
-const { generateQuoteContent } = require('./contentGenerator');
+const { generateQuoteContent, ORIGINAL_QUOTES } = require('./contentGenerator');
+const { THIRUKKURAL_CORPUS } = require('./thirukkuralSource');
 const { validateContent } = require('./contentValidator');
 const { selectVisualStrategy } = require('./visualStrategy');
 const { selectAudioStrategy } = require('./audioStrategy');
+const {
+  computeContentFingerprint,
+  resolveDedupWindow,
+  recordAcceptedContent,
+  getRecentContentHistory,
+  isContentDuplicate,
+} = require('./contentDeduplication');
 
 // In-memory fallback for test harnesses or executions without persistent workflowId
 const memoryTopicState = new Map(); // key: `${workflowId || 'local'}:${topic}` -> { last_language, occurrence_count }
@@ -175,6 +183,29 @@ function getQuoteJobCount(workflowId) {
 }
 
 /**
+ * Gets the most recent root (scheduled / non-regenerated) quote video job for a workflow.
+ */
+function getLatestRootQuoteJob(workflowId) {
+  if (!workflowId) return null;
+  const row = db
+    .prepare("SELECT * FROM quote_video_jobs WHERE workflow_id = ? AND (parent_job_id IS NULL OR parent_job_id = '') ORDER BY created_at DESC, rowid DESC LIMIT 1")
+    .get(workflowId);
+  if (!row) return null;
+  return parseJobRow(row);
+}
+
+/**
+ * Gets count of root (non-regenerated) quote jobs for a workflow.
+ */
+function getRootQuoteJobCount(workflowId) {
+  if (!workflowId) return 0;
+  const row = db
+    .prepare("SELECT COUNT(*) as count FROM quote_video_jobs WHERE workflow_id = ? AND (parent_job_id IS NULL OR parent_job_id = '')")
+    .get(workflowId);
+  return row?.count || 0;
+}
+
+/**
  * Gets a specific quote video job by its ID.
  */
 function getQuoteJobById(jobId) {
@@ -188,8 +219,22 @@ function getQuoteJobById(jobId) {
  * Helper to parse SQLite row into JSON objects and standard fields.
  */
 function parseJobRow(row) {
+  let computedReviewStatus = row.review_status;
+  if (!computedReviewStatus || computedReviewStatus === 'pending') {
+    if (row.render_status === 'rendered') {
+      computedReviewStatus = 'ready_for_review';
+    } else if (row.render_status === 'render_failed') {
+      computedReviewStatus = 'render_failed';
+    } else if (row.render_status === 'rendering') {
+      computedReviewStatus = 'rendering';
+    } else {
+      computedReviewStatus = 'not_rendered';
+    }
+  }
+
   return {
     ...row,
+    workflowId: row.workflow_id,
     hashtags: JSON.parse(row.hashtags || '[]'),
     visualStrategy: JSON.parse(row.visual_strategy || '{}'),
     audioStrategy: JSON.parse(row.audio_strategy || '{}'),
@@ -198,6 +243,11 @@ function parseJobRow(row) {
     spec: JSON.parse(row.spec || '{}'),
     renderStatus: row.render_status,
     jobStatus: row.job_status,
+    reviewStatus: computedReviewStatus,
+    reviewedAt: row.reviewed_at || null,
+    reviewedBy: row.reviewed_by || null,
+    parentJobId: row.parent_job_id || null,
+    version: row.version != null ? Number(row.version) : 1,
     renderedAt: row.rendered_at || null,
     outputPath: row.output_path || null,
     outputUrl: row.output_url || null,
@@ -205,6 +255,9 @@ function parseJobRow(row) {
     height: row.height != null ? Number(row.height) : null,
     fileSize: row.file_size != null ? Number(row.file_size) : null,
     errorMessage: row.error_message || null,
+    publishStatus: row.publish_status || 'not_scheduled',
+    publishedAt: row.published_at || null,
+    publishError: row.publish_error || null,
   };
 }
 
@@ -229,15 +282,18 @@ async function prepareDailyQuoteVideo({
 
   // 1. Fetch historical execution context for deterministic rotation
   const lastJob = workflowId ? getLatestQuoteJob(workflowId) : null;
+  const lastRootJob = workflowId ? getLatestRootQuoteJob(workflowId) : null;
   const jobCount = workflowId ? getQuoteJobCount(workflowId) : 0;
+  const rootJobCount = workflowId ? getRootQuoteJobCount(workflowId) : 0;
 
   // 2. Topic Determination (Topic is resolved FIRST so we know which topic's language state to check)
+  // Scheduled runs rotate from the last scheduled/root topic so regenerations never advance or disrupt global topic rotation.
   const resolvedTopic = options.topic || resolveTopic({
     topicMode: config.topicMode || 'rotate',
     selectedTopic: config.selectedTopic || 'motivation',
     selectedTopics: config.selectedTopics || null,
-    lastTopic: lastJob?.topic || null,
-    runCount: jobCount,
+    lastTopic: (lastRootJob || lastJob)?.topic || null,
+    runCount: rootJobCount,
   });
   const topicMeta = getTopicMeta(resolvedTopic);
 
@@ -263,14 +319,49 @@ async function prepareDailyQuoteVideo({
     ? config.platforms
     : ['instagram', 'youtube_shorts'];
 
-  // 5. Content Generation with Retry Loop (up to 3 tries)
-  const MAX_RETRIES = 3;
+  // 5. Content Generation with Deduplication & Quality Validation Loop (up to 5 attempts)
+  const dedupWindow = resolveDedupWindow(config, options);
+  const topicHistory = getRecentContentHistory(workflowId, {
+    topic: resolvedTopic,
+    limit: dedupWindow,
+  });
+  const recentHistory = getRecentContentHistory(workflowId, {
+    topic: resolvedTopic,
+    language: resolvedLanguage,
+    limit: dedupWindow,
+  });
+
+  // Calculate pool size for graceful window adaptation
+  let poolSize = null;
+  if (resolvedTopic === 'thirukkural') {
+    poolSize = THIRUKKURAL_CORPUS.length;
+  } else if (ORIGINAL_QUOTES[resolvedTopic]) {
+    poolSize = (ORIGINAL_QUOTES[resolvedTopic][resolvedLanguage] || []).length || null;
+  }
+
+  const MAX_RETRIES = 5;
   let attempt = 0;
   let content = null;
   let validation = null;
+  let candidateAccepted = false;
+  const attemptedFingerprints = new Set();
+  const attemptedNumbers = new Set();
 
   while (attempt < MAX_RETRIES) {
     attempt++;
+
+    // Combined exclusions: past accepted history + previous failed candidates in this run
+    const currentExcludeFps = [
+      ...recentHistory.map((h) => h.fingerprint),
+      ...Array.from(attemptedFingerprints),
+    ];
+    const currentExcludeNumbers = [
+      ...topicHistory
+        .map((h) => (h.itemIdentity?.startsWith('kural:') ? parseInt(h.itemIdentity.slice(6), 10) : null))
+        .filter(Boolean),
+      ...Array.from(attemptedNumbers),
+    ];
+
     content = await generateQuoteContent({
       language: resolvedLanguage,
       topic: resolvedTopic,
@@ -278,9 +369,32 @@ async function prepareDailyQuoteVideo({
       context: {
         runIndex: jobCount + attempt - 1,
         theme: topicMeta.category,
+        recentHistory,
+        excludeFingerprints: currentExcludeFps,
+        excludeNumbers: currentExcludeNumbers,
       },
     });
 
+    const candidateFp = computeContentFingerprint(content);
+    if (candidateFp) attemptedFingerprints.add(candidateFp);
+    if (content.kuralNumber) attemptedNumbers.add(content.kuralNumber);
+
+    // STEP: Content Deduplication / History Check
+    const duplicate = isContentDuplicate(content, {
+      workflowId,
+      topic: resolvedTopic,
+      language: resolvedLanguage,
+      window: dedupWindow,
+      poolSize,
+      recentHistory,
+    });
+
+    if (duplicate) {
+      console.warn(`[prepareDailyQuoteVideo] Candidate duplicate detected for ${resolvedTopic} (${resolvedLanguage}), retrying attempt ${attempt}/${MAX_RETRIES}...`);
+      continue;
+    }
+
+    // STEP: Content Quality Validation
     validation = validateContent(content, {
       expectedLanguage: resolvedLanguage,
       expectedTopic: resolvedTopic,
@@ -288,14 +402,15 @@ async function prepareDailyQuoteVideo({
     });
 
     if (validation.valid) {
+      candidateAccepted = true;
       break;
     }
   }
 
-  // If still invalid after retries, mark for review or validation failure
+  // If still invalid or duplicate after retries, mark for review or validation failure
   let jobStatus = 'ready_for_render';
-  if (!validation.valid) {
-    jobStatus = validation.tamilQuality?.requiresReview ? 'requires_review' : 'validation_failed';
+  if (!candidateAccepted || !validation?.valid) {
+    jobStatus = (validation?.tamilQuality?.requiresReview || !candidateAccepted) ? 'requires_review' : 'validation_failed';
   }
 
   // 6. Visual Strategy Selection
@@ -313,9 +428,19 @@ async function prepareDailyQuoteVideo({
     duration,
   });
 
-  // 8. Persist Per-Topic Language State
+  // 8. Persist Per-Topic Language State & Content History
   saveTopicLanguageState(workflowId, resolvedTopic, resolvedLanguage);
   const currentTopicState = getTopicLanguageState(workflowId);
+
+  // Record accepted candidate in generic content history
+  if (candidateAccepted && content) {
+    recordAcceptedContent(workflowId, {
+      topic: resolvedTopic,
+      language: resolvedLanguage,
+      content,
+      jobId,
+    });
+  }
 
   // 9. Build Video Preparation Specification
   const videoSpec = {
@@ -367,17 +492,21 @@ async function prepareDailyQuoteVideo({
     try {
       const wfExists = db.prepare('SELECT id FROM workflows WHERE id = ?').get(workflowId);
       if (wfExists) {
+        const parentJobId = options.parentJobId || null;
+        const version = options.version || 1;
         db.prepare(`
           INSERT INTO quote_video_jobs (
           id, workflow_id, run_id, language, topic, duration,
           title, quote, explanation, caption, hashtags,
           visual_strategy, audio_strategy, platforms,
-          render_status, job_status, validation, spec, created_at, updated_at
+          render_status, job_status, review_status, parent_job_id, version,
+          validation, spec, created_at, updated_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?,
-          ?, ?, ?, ?, datetime('now'), datetime('now')
+          ?, ?, ?, ?, ?,
+          ?, ?, datetime('now'), datetime('now')
         )
       `).run(
         jobId,
@@ -396,6 +525,9 @@ async function prepareDailyQuoteVideo({
         JSON.stringify(platforms),
         'not_rendered',
         jobStatus,
+        'not_rendered',
+        parentJobId,
+        version,
         JSON.stringify(validation),
         JSON.stringify(videoSpec)
       );
@@ -410,6 +542,9 @@ async function prepareDailyQuoteVideo({
     workflowId,
     jobStatus,
     renderStatus: 'not_rendered',
+    reviewStatus: 'not_rendered',
+    parentJobId: options.parentJobId || null,
+    version: options.version || 1,
     language: resolvedLanguage,
     topic: resolvedTopic,
     topicLanguageState: currentTopicState,
@@ -427,9 +562,11 @@ async function prepareDailyQuoteVideo({
 module.exports = {
   prepareDailyQuoteVideo,
   getLatestQuoteJob,
+  getLatestRootQuoteJob,
   getQuoteJobById,
   listQuoteJobs,
   getQuoteJobCount,
+  getRootQuoteJobCount,
   getTopicPreviousLanguage,
   getTopicLanguageState,
   saveTopicLanguageState,

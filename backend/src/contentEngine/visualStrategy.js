@@ -133,9 +133,17 @@ function selectVisualStrategy({
     resolvedDescription = 'Pure solid black background providing maximum contrast for typography';
   }
 
+  const { resolveTopicVisualProfile } = require('./visual/topicVisualProfiles');
+  const profile = resolveTopicVisualProfile({
+    topic: normTopic,
+    visualStyle: normStyle,
+    language,
+  });
+
   return {
     style: resolvedStyle,
-    backgroundType: normStyle === 'plain_black' ? 'solid_color' : 'generated_or_licensed',
+    visualTitle: profile.visualTitle,
+    backgroundType: normStyle === 'plain_black' ? 'solid_color' : profile.backgroundType || 'generated_or_licensed',
     aspectRatio: '9:16',
     fallback: 'plain_black',
     status: 'pending', // Explicit pending state: no scraping, no fake generation

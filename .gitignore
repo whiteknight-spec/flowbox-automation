@@ -2,8 +2,14 @@ node_modules/
 dist/
 data/
 .env
+*.env
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
 backend/storage/
+backend/qa_frames/
